@@ -13,11 +13,11 @@ project-root/
 ├── debug.log (create this as an empty file – it will populate with debug logs)
 │
 └── src/
-├── gauge-segmented.js
-├── renderer-segmented.js
-├── index.html
-└── fonts/ (optional)
-      └── *.ttf
+      ├── gauge-segmented.js
+      ├── renderer-segmented.js
+├      ── index.html
+      └── fonts/ (optional)
+            └── *.ttf
 
 ## Important Notes
 
