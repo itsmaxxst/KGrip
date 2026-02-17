@@ -15,7 +15,7 @@ project-root/
 └── src/
       ├── gauge-segmented.js
       ├── renderer-segmented.js
-├      ── index.html
+      ├── index.html
       └── fonts/ (optional)
             └── *.ttf
 
