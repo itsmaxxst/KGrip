@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>USB KForce Gauge - Segmented</title>
+    <style>
+      @font-face {
+        font-family: 'Open Sans';
+        src: url('fonts/OpenSans-Regular.ttf') format('truetype');
+        font-weight: 400;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'Open Sans';
+        src: url('fonts/OpenSans-Bold.ttf') format('truetype');
+        font-weight: 700;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'Open Sans';
+        src: url('fonts/OpenSans-Italic.ttf') format('truetype');
+        font-weight: 400;
+        font-style: italic;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: 'Open Sans', sans-serif;
+        background: transparent;
+        overflow: hidden;
+      }
+
+      #container {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      canvas {
+        -webkit-app-region: no-drag; /* Canvas is not draggable */
+      }
+
+    </style>
+  </head>
+  <body>
+      <div id="container">
+        <canvas id="gaugeCanvas" width="700" height="550"></canvas>
+      </div>
+    <script src="gauge-segmented.js"></script>
+    <script src="renderer-segmented.js"></script>
+  </body>
+</html>
