@@ -2,6 +2,13 @@
 
 For this to work you have to follow the file structure exactly as shown below.
 
+## Package.json dependencies (check electron documentation on how to structure it for your build)
+
+ - big.js
+ - serialPort
+ - zeromq
+ - electron
+
 ## Required File Structure
 
 project-root/
