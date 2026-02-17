@@ -27,6 +27,10 @@ project-root/
  - zeromq
  - electron
 
+ ## Config.json
+ 
+ Change the variables as you need, it should match your specific device, you can also customize the timers, baseline etc.
+
 ## Important Notes
 
 ### 1. `debug.log`
