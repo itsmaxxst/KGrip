@@ -2,13 +2,6 @@
 
 For this to work you have to follow the file structure exactly as shown below.
 
-## Package.json dependencies (check electron documentation on how to structure it for your build)
-
- - big.js
- - serialPort
- - zeromq
- - electron
-
 ## Required File Structure
 
 project-root/
@@ -17,6 +10,7 @@ project-root/
 ├── queue.js
 ├── temp.json
 ├── config.json
+├── package.json
 ├── debug.log (create this as an empty file – it will populate with debug logs)
 │
 └── src/
@@ -25,6 +19,13 @@ project-root/
       ├── index.html
       └── fonts/ (optional)
             └── *.ttf
+
+ ## Package.json dependencies (check electron documentation on how to structure it for your build)
+
+ - big.js
+ - serialPort
+ - zeromq
+ - electron
 
 ## Important Notes
 
