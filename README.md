@@ -1,4 +1,4 @@
-# Project Setup Instructions
+# Project Setup Instructions (check it in code mode or raw version for readability)
 
 For this to work you have to follow the file structure exactly as shown below.
 
