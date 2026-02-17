@@ -1,0 +1,24 @@
+{
+  "socket": {
+    "zeromqIp": "address",
+    "zeromqPort": "port"
+  },
+  "path": "path",
+  "manufacturer": "manufacturer",
+  "locationId": "locationId",
+  "vendorId": "vendorId",
+  "productId": "productId",
+  "trigger": 1.8,
+  "ceilWeight": 100,
+  "samplingDelay": 2000,
+  "timeout": 45000,
+  "duration": 5000,
+  "baseline": 15000,
+  "baselineTimeNotSet": 500,
+  "baselineTimeSetting": 3000,
+  "bigRound": 2,
+  "debug": true,
+  "debugLevel" : 3,
+
+  "logFilePath": "path to where you want to save the debug.log file"
+}
