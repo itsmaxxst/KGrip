@@ -31,6 +31,7 @@ let first = true;
 let startTimeoutMeasurement = false;
 let stopMeasurement = false;
 let baseline = 0;
+let baselineSetted = false;
 let num = 0;
 let weight = 0;
 let weightMax = 0;
@@ -139,18 +140,13 @@ function endAlgorithm(error, errorMessage) {
       port && port.isOpen && port.close();
       port = undefined;
     }
+    resetState();
   }
-  first = true;
 
-  stopMeasurement = false;
+  weightMax = 0;
   startTimeoutMeasurement = false;
   weightArray.length = 0;
-  baseline = 0;
   measureStarted = false;
-
-  if (port) {
-     sendCommand(commands[SamplingOff]);
-  }
 
   fs.writeFile("./temp.json", JSON.stringify(tempFile), (err) => {
     if (err) return console.error(err);
@@ -339,8 +335,11 @@ async function listenZmq() {
           break;
 
         case "appShow":
-          stopMeasure();
-          emitMessage({ message: "app_show" });
+          emitMessage({ message: "app_show", range: message.inputData.range });
+          break;
+
+        case "measureSetting":
+          KGrip(socketPath);
           break;
         
         case "showGauge":
@@ -439,7 +438,6 @@ function startDetectDevice(cb) {
               log(3, "wait to set baseline");
               clearInterval(searchUsbInterval);
               emitMessage({ message: "device_found" });
-              KGrip(socketPath);
             }
           });
         })
@@ -450,7 +448,6 @@ function startDetectDevice(cb) {
       }, 1000);
   } else if (port.isOpen){
     emitMessage({ message: "device_found" });
-    KGrip(socketPath);
   }
 }
 
@@ -483,6 +480,7 @@ function KGrip(socketPath) {
         parser.on("data", checkResponse);
         // Sampling=On
         sendCommand(commands[SamplingOn]);
+        stopMeasurement = false;
         }, config.samplingDelay);
     }
   )
@@ -542,6 +540,7 @@ function KGrip(socketPath) {
         timeoutForCancelSamplingTimeout = undefined;
         log(3, "start timeout for start sampling");
         timeoutForStartSampling = setTimeout(() => {
+          baselineSetted = true;
           // Set the baseline only if num > config.baseline
           baseline = value;
           num = value;
@@ -549,18 +548,14 @@ function KGrip(socketPath) {
           first = false;
           log(3, "baseline ok, start measure :", baseline);
           weightMax = 0;
-          emitMessage({ message: "baseline_ok" });
-          mainWindow.show();
-          mainWindow.setAlwaysOnTop(true, "screen-saver");
-          mainWindow.moveTop();
-          mainWindow.focus();
+          emitMessage({ message: "baseline_ok"});
         }, config.baselineTimeSetting);
       }
       // if the value is below the baseline threshold:
       // - clear the eventual previsous timeout
       // - start a timer to cancel the above timer. If a value bigger than config.baseline
       // is detected within 500ms, this timer will be cancelled
-      else if (value < config.baseline && !timeoutForCancelSamplingTimeout) {
+      else if (value < config.baseline && !timeoutForCancelSamplingTimeout && !baselineSetted) {
         clearTimeout(timeoutForCancelSamplingTimeout);
         timeoutForCancelSamplingTimeout = setTimeout(() => {
           clearTimeout(timeoutForStartSampling);
@@ -580,53 +575,52 @@ function KGrip(socketPath) {
         .abs()
         .round(config.bigRound)
         .toNumber();
-      if (weight > config.trigger) {
-        // trigger start if weight > 0.8 value
-        if (!startTimeoutMeasurement) {
+        // trigger start if weight > 1.8 value
+        if (!startTimeoutMeasurement && weight > config.trigger && !stopMeasurement) {
           log(3, "Start Measurement");
+          startTimeoutMeasurement = true;
 
           clearTimeout(algorithmTimeout);
           measurementTimeout = setTimeout(() => {
-            // set a 5 sec timeout for the measurement duration
-            stopMeasurement = true;
-            log(3, "Stop Measurement");
-            errorFlag = "00";
-            checkError(errorFlag, (error, errorMessage) => {
-              if (error) return endAlgorithm(error, errorMessage);
-              tempFile.outputData.weightMax = weightMax.toFixed(1);
-              tempFile.outputData.weightArray = JSON.stringify(weightArray);
-              tempFile.outputData.weightMedia = (
-                weightArray.reduce((a, b) => a + b, 0) / weightArray.length
-              ).toFixed(1);
-              // Showing results
-              log(3, "Baseline: ", baseline);
-              log(3, "Coef: ", coef);
-              log(3, "Num measures: ", weightArray.length);
-              log(3, "WeightMax: ", tempFile.outputData.weightMax, "Kg");
-              log(3, "WeightAVG: ", tempFile.outputData.weightMedia, "Kg");
+              // set a 5 sec timeout for the measurement duration
+              stopMeasurement = true;
+              log(3, "Stop Measurement");
+              sendCommand(commands[SamplingOff]);
+              errorFlag = "00";
+              checkError(errorFlag, (error, errorMessage) => {
+                if (error) return endAlgorithm(error, errorMessage);
+                tempFile.outputData.weightMax = weightMax.toFixed(1);
+                tempFile.outputData.weightArray = JSON.stringify(weightArray);
+                tempFile.outputData.weightMedia = (
+                  weightArray.reduce((a, b) => a + b, 0) / weightArray.length
+                ).toFixed(1);
+                // Showing results
+                log(3, "Baseline: ", baseline);
+                log(3, "Coef: ", coef);
+                log(3, "Num measures: ", weightArray.length);
+                log(3, "WeightMax: ", tempFile.outputData.weightMax, "Kg");
+                log(3, "WeightAVG: ", tempFile.outputData.weightMedia, "Kg");
 
-              emitMessage({
-                message: "measure_finish",
-                rawMeasures: tempFile.outputData.weightArray,
-                avg: tempFile.outputData.weightMedia,
-                max: tempFile.outputData.weightMax,
+                emitMessage({
+                  message: "measure_finish",
+                  rawMeasures: tempFile.outputData.weightArray,
+                  avg: tempFile.outputData.weightMedia,
+                  max: tempFile.outputData.weightMax,
+                });
+                return endAlgorithm();
               });
-              return endAlgorithm();
-            });
           }, config.duration);
-          startTimeoutMeasurement = true;
         }
-        if (weight < config.ceilWeight && !stopMeasurement) {
+        if (weight < config.ceilWeight && startTimeoutMeasurement && !stopMeasurement) {
           // take the weight value if valid (less than < config.ceilWeight) and if measurement is running
           if (weight > weightMax) {
             // updating weightMax
             weightMax = weight;
           }
           weightArray.push(weight);
-          emitMessage({ message: "measure_received", value: weight.toFixed(1) });
+          emitMessage({ message: "measure_received", value: weight.toFixed(1) , duration: config.duration});
           log(3, "Weight: ", weight.toFixed(1), " - WeightMax: ", weightMax.toFixed(1))
         }
-      }
     }
   }
 
@@ -659,22 +653,18 @@ function startMeasure(cb) {
     endAlgorithm(6);
   },config.timeout);
 
-  emitMessage({ message: "measureSamplingOn" });
+  emitMessage({ message: "measureSamplingOn"});
   sendCommand(commands[SamplingOn]);
+  stopMeasurement = false;
 }
 
 /**
  * stopMeasure
  */
 function stopMeasure() {
-  
-  // Clearing all the timeouts
-  algorithmTimeout && clearTimeout(algorithmTimeout);
-  timeoutForStartSampling && clearTimeout(timeoutForStartSampling);
-  timeoutForCancelSamplingTimeout && clearTimeout(timeoutForCancelSamplingTimeout);
-  measurementTimeout && clearTimeout(measurementTimeout);
-  searchUsbInterval && clearInterval(searchUsbInterval);
+
   log(3, "Stop Measure");
+  resetState();
 
   // Closing the port
   if (port) {
@@ -682,7 +672,7 @@ function stopMeasure() {
     setTimeout(() => {
       if(port){
         try {
-          sendCommand(commands[DeviceOff]);    
+          sendCommand(commands[DeviceOff]);  
           log(3, "Closing Port");
           setTimeout(() => {
             port && port.isOpen && port.close();
@@ -697,6 +687,37 @@ function stopMeasure() {
   } else {
     clearInterval(searchUsbInterval);
   }
+}
+
+/**
+ * resetState
+ */
+function resetState() {
+  log(3, "Resetting states to initial values");
+
+  clearTimeout(algorithmTimeout);
+  clearTimeout(timeoutForStartSampling);
+  clearTimeout(timeoutForCancelSamplingTimeout);
+  clearTimeout(measurementTimeout);
+  clearInterval(searchUsbInterval);
+
+  measureStarted = false;
+  coef = 0;
+  first = true;
+  startTimeoutMeasurement = false;
+  stopMeasurement = false;
+  baseline = 0;
+  baselineSetted = false;
+  num = 0;
+  weight = 0;
+  weightMax = 0;
+  weightArray = [];
+
+  timeoutForStartSampling = undefined;
+  timeoutForCancelSamplingTimeout = undefined;
+  searchUsbInterval = undefined;
+  measurementTimeout = undefined;
+  algorithmTimeout = undefined;
 }
 
 let mainWindow;
