@@ -9,11 +9,14 @@ const zeromq = require('zeromq');
 const Big = require('big.js');
 const { SerialPort } = require('serialport');
 const { ByteLengthParser } = require('@serialport/parser-byte-length');
-const JobQueue = require('./queue');
+
+const JobQueue = require('./lib/queue');
+const { loadConfig }  = require('./lib/config');
+const Logger          = require('./lib/logger');
+
 
 // Definitions
 const dealer = new zeromq.Dealer();
-let config = {}
 let measureStarted = false;
 let tempFile = {
   hardware: "KForceGrip",
@@ -36,6 +39,9 @@ let num = 0;
 let weight = 0;
 let weightMax = 0;
 let weightArray = [];
+let durationSent = false;
+let parserCount = 0;
+let parser = null;
 
 // Timeout definitions
 let timeoutForStartSampling = undefined;
@@ -55,19 +61,19 @@ const queue = new JobQueue({ concurrency: 1, retryDelay:0, timeout: 1 });
 
 // Listen to events
 queue.on('job:added', (job) => {
-  log(4,`a Job added: ${job.id} (${job.type})`);
+  logger.debug(`a Job added: ${job.id} (${job.type})`);
 });
 queue.on('job:start', (job) => {
-  log(4,`p Processing: ${job.id} (attempt ${job.attempts})`);
+  logger.debug(`p Processing: ${job.id} (attempt ${job.attempts})`);
 });
 queue.on('job:completed', (job, result) => {
-  log(4,`c Completed: ${job.id} - Result: ${result}`);
+  logger.debug(`c Completed: ${job.id} - Result: ${result}`);
 });
 queue.on('job:failed', (job, error) => {
-  log(4,`x Failed: ${job.id} - ${error.message}`);
+  logger.debug(`x Failed: ${job.id} - ${error.message}`);
 });
 queue.on('job:retry', (job) => {
-  log(4,`r Retrying: ${job.id} (attempt ${job.attempts})`);
+  logger.debug(`r Retrying: ${job.id} (attempt ${job.attempts})`);
 });
 queue.process('zeromqSendMessage', 
   // Your async work here
@@ -76,7 +82,7 @@ queue.process('zeromqSendMessage',
       // Call the async operation and resolve/reject when it finishes
       dealer.send(data.message)
         .then(() => { // success -> resolve the outer promise
-          log(4, `---> Sent message ${data.message}`)
+          logger.debug(`---> Sent message ${data.message}`)
           return resolve;
         })        
         .catch(reject);         // error   -> reject  the outer promise
@@ -110,6 +116,8 @@ commands[GetCoef]     = [new Buffer.from([0x21]), "Get Coefficient"]
 commands[SamplingOff] = [new Buffer.from([0x10]), "Sampling off"]
 commands[SamplingOn]  = [new Buffer.from([0x11]), "Sampling on"]
 commands[DeviceOff]   = [new Buffer.from([0x7a]), "Deactivate device"]
+
+const messages = [ 'measure_received'];
 
 /**
  *
@@ -148,16 +156,6 @@ function endAlgorithm(error, errorMessage) {
   weightArray.length = 0;
   measureStarted = false;
 
-  fs.writeFile("./temp.json", JSON.stringify(tempFile), (err) => {
-    if (err) return console.error(err);
-    log(3, "Temp.json file written");
-    tempFile = {
-      hardware: "KForceGrip",
-      inputData: {},
-      outputData: {},
-      messages: [],
-    }
-  });
 }
 
 /**
@@ -168,140 +166,32 @@ function sendCommand(command) {
   port &&
     port.write(command[commandCode], (err) => {
       if (err) {
-        log(1, "Error on send command: ", err.message);
+        logger.error(`Error on send command: ${err.message}`);
         return endAlgorithm(3);
       }
-      log(3, "command sent:", command[commandDesc]);
+      logger.info( `command sent: ${command[commandDesc]}`);
     });
   if(!port) {
-    log(1, "Port Not Opened", command);
+    logger.error(`Port Not Opened ${command}`);
   }
 }
 
-/**
- * loadFile
- * @param {*} file 
- */
-function loadFile(file) {
-  // Checks for config & temp
-  const exeDir = path.dirname(process.execPath);
-  const externalPath = path.join(exeDir, file);
-  const userPath = path.join(app.getPath("userData"), file);
-  const defaultPath = path.join(app.getAppPath(), file);
-  try {
 
-    // Checks for file in .exe path
-    if(fs.existsSync(externalPath)){
-      console.log(`Loading ${file} from exe directory`);
-      const raw = fs.readFileSync(externalPath, 'utf8');
-      return JSON.parse(raw);
-    }
+let config;
+try { config = loadConfig(process.argv || 'config.json'); }
+catch (err) { process.stderr.write(`[FATAL] ${err.message}\n`); process.exit(1); }
 
-    // Checks for file in UserData if it's missing in .exe path
-    if(fs.existsSync(userPath)){
-      console.log(`Loading ${file} from UserData`);
-      const raw = fs.readFileSync(userPath, 'utf8');
-      return JSON.parse(raw);
-    }
+// - 2. Logger ----
+const logger = new Logger({ 
+                logDir: config.log.logDir,
+                logName: config.log.logName, 
+                level: config.log.level ,
+                rotate: config.log.rotate,
+                maxBytes: config.log.maxBytes,
+                maxFiles: config.log.maxFiles,
+                console: config.log.console });
+logger.info('KForceGripGUI plugin starting');
 
-    // Copy file from app.asar if file is not found in UserData
-    console.log(`Copying ${file} to UserData`);
-
-    if(fs.existsSync(defaultPath)){
-      const raw = fs.readFileSync(defaultPath, 'utf8');
-      fs.writeFileSync(userPath, raw);
-      return JSON.parse(raw);
-    }
-
-    console.log(`Default ${file} not found in appPath`);
-    return {};
-  } catch (err) {
-    console.error(`Failed to load ${file}: `, err);
-    return {};
-  }
-}
-
-config = loadFile('config.json');
-
-tempFile = loadFile('temp.json');
-
-// Console LOG customization
-if (config.logFilePath) {
-  var logFile = fs.createWriteStream(config.logFilePath, { flags: "a" });
-  var logStdout = process.stdout;
-
-  console.log = config.debug
-    ? function () {
-        let ts = Date.now();
-
-        let date_time = new Date(ts);
-        let date = date_time.getDate();
-        let month = date_time.getMonth() + 1;
-        let year = date_time.getFullYear();
-        let hours = date_time.getHours();
-        let minutes = date_time.getMinutes();
-        let seconds = date_time.getSeconds();
-        logFile.write(
-          "[" +
-            year +
-            "/" +
-            month +
-            "/" +
-            date +
-            "-" +
-            hours +
-            ":" +
-            minutes +
-            ":" +
-            seconds +
-            "] " +
-            util.format.apply(null, arguments) +
-            "\n"
-        );
-        logStdout.write(
-          "[" +
-            year +
-            "/" +
-            month +
-            "/" +
-            date +
-            "-" +
-            hours +
-            ":" +
-            minutes +
-            ":" +
-            seconds +
-            "] " +
-            util.format.apply(null, arguments) +
-            "\n"
-        );
-      }
-    : console.log;
-
-  console.error = config.debug ? console.log: console.error;
-  console.warn  = config.debug ? console.log: console.warn;
-  console.info  = config.debug ? console.log: console.info;
-  console.debug = config.debug ? console.log: console.debug;
-    
-}
-
-const debugLevel = config.debugLevel || 0;
-/**
- * Log helper that respects the current debug level.
- * @param {number} level - Desired log level (1-4)
- * @param {...any} args - Values to log
- */
-function log(level, ...args) {
-  if (debugLevel >= level) {
-    switch (level) {
-      case 1: console.error(...args); break;   // Error
-      case 2: console.warn(...args);  break;   // Warning
-      case 3: console.info(...args);  break;   // Info
-      case 4: console.debug(...args); break;   // Verbose/debug
-      default: console.log(...args);
-    }
-  }
-}
 
 const endpoint = "tcp://" + config.socket.zeromqIp + ":" + config.socket.zeromqPort;
 
@@ -311,7 +201,7 @@ async function listenZmq() {
     try {
       const message = JSON.parse(msg.toString());
 
-      log(3, "ZMQ messagge received: ", message);
+      logger.info( ` > zmq received: ${message.inputData.cmd}`);
 
       if (!message.inputData || !message.inputData.cmd) return;
 
@@ -352,7 +242,7 @@ async function listenZmq() {
       }
 
     } catch (err) {
-      log(1, "Invalid ZMQ message:", err);
+      logger.error(` > zmq received : ${err}`);
     }
   }
 }
@@ -361,10 +251,10 @@ async function listenZmq() {
 async function initZmq() {
   try {
     await dealer.bind(endpoint);
-    log(3, "ZeroMQ bind on endpoint:", endpoint);
+    logger.info( `ZeroMQ bind on endpoint: ${endpoint}`);
     listenZmq(); 
   } catch (error) {
-    log(1, "ZeroMQ socket problem: " + error);
+    logger.error(`ZeroMQ socket problem: ${error}`);
   }
 }
 
@@ -404,7 +294,10 @@ function emitMessage(payload) {
     callback(payload);
   }
   //POD
-  zeromqSendMessage(JSON.stringify({ outputData: payload }));
+  if ( !messages.includes(payload.message) ){
+    zeromqSendMessage(JSON.stringify({ outputData: payload }));
+    logger.info(` < zmq sent: ${payload.message}`);
+  }
 }
 
 /**
@@ -416,33 +309,33 @@ function startDetectDevice(cb) {
   algorithmTimeout = setTimeout(() => {
     clearInterval(searchUsbInterval);
     if (!socketPath) return endAlgorithm(2);
-    log(1, "Timeout, nobody showed up");
+    logger.error("Timeout, nobody showed up");
     emitMessage({ message: "timeout" });
     return endAlgorithm(6);
   }, config.timeout); // 1/2 minute to general timeout + 5 seconds of start measurement
 
-  log(3, "Searching K-Grip...");
+  logger.info( "Searching K-Grip...");
   if (!port) {
     searchUsbInterval = setInterval(() => {
-      log(4, ".");
+      logger.debug(".");
       SerialPort.list()
         .then((data) => {
           data.some((device) => {
             //console.log(device)
             if (
-              device.productId == config.productId &&
-              device.vendorId == config.vendorId
+              device.productId == config.port.productId &&
+              device.vendorId == config.port.vendorId
             ) {
               socketPath = device.path;
-              log(3, "Found it on path:", socketPath);
-              log(3, "wait to set baseline");
+              logger.info( `Found it on path: ${socketPath}`);
+              logger.info( "wait to set baseline");
               clearInterval(searchUsbInterval);
               emitMessage({ message: "device_found" });
             }
           });
         })
         .catch((error) => {
-          log(1, error);
+          logger.error(error);
           endAlgorithm(5);
         });
       }, 1000);
@@ -467,35 +360,39 @@ function KGrip(socketPath) {
        },
     );
   
-    port.on('error', error => log(1, error))
+    port.on('error', error => logger.error(error))
   
     port.on('open', () =>{
-      log(3, "Connected");
+      logger.info( "Connected");
       // Send Coef reading message
       sendCommand(commands[SamplingOff]);
       sendCommand(commands[GetCoef]);
       setTimeout(() => {
         // Setting parser trigger event on ByteLength 11
-        const parser = port.pipe(new ByteLengthParser({ length: 11 }));
+        parser = port.pipe(new ByteLengthParser({ length: 11 }));
         parser.on("data", checkResponse);
         // Sampling=On
         sendCommand(commands[SamplingOn]);
         stopMeasurement = false;
         }, config.samplingDelay);
-    }
-  )
-  
+      }
+    )
+
+    port.on('close', () => {
+      parser = null;
+    });
+    
     port.on("data", (data) => {
       if (data.length === 6) {
         // Reading the Coef
         coef = data.toString() / 1000000;
-        log(3, "Coef: ", coef);
+        logger.info(`Coef: ${coef}`);
       }
     });
   } else if (port.isOpen){
-    log(1, "Error: port already opened, wrong flow")
+    logger.error("Error: port already opened, wrong flow")
     sendCommand(commands[DeviceOff]);
-    log(1, "Error: Closing Port ", port.path);
+    logger.error(`Error: Closing Port ${port.path}`);
     setTimeout(() => {
       port && port.isOpen && port.close();
       port = undefined;            
@@ -535,10 +432,10 @@ function KGrip(socketPath) {
         (!timeoutForStartSampling || timeoutForStartSampling._destroyed)
       ) {
         clearTimeout(timeoutForCancelSamplingTimeout);
-        log(3, "Potential Baseline:", value, config.baseline);
+        logger.info(`Potential Baseline: ${value}, ${config.baseline}`);
 
         timeoutForCancelSamplingTimeout = undefined;
-        log(3, "start timeout for start sampling");
+        logger.info("start timeout for start sampling");
         timeoutForStartSampling = setTimeout(() => {
           baselineSetted = true;
           // Set the baseline only if num > config.baseline
@@ -546,7 +443,7 @@ function KGrip(socketPath) {
           num = value;
           //console.log('Baseline: ', baseline)
           first = false;
-          log(3, "baseline ok, start measure :", baseline);
+          logger.info(`baseline ok, start measure : ${baseline}`);
           weightMax = 0;
           emitMessage({ message: "baseline_ok"});
         }, config.baselineTimeSetting);
@@ -559,7 +456,7 @@ function KGrip(socketPath) {
         clearTimeout(timeoutForCancelSamplingTimeout);
         timeoutForCancelSamplingTimeout = setTimeout(() => {
           clearTimeout(timeoutForStartSampling);
-          log(3, "baseline_stop");
+          logger.info("baseline_stop");
           emitMessage({ message: "baseline_stop", code: 1001 });
           timeoutForStartSampling = undefined;
         }, config.baselineTimeNotSet);
@@ -577,14 +474,15 @@ function KGrip(socketPath) {
         .toNumber();
         // trigger start if weight > 1.8 value
         if (!startTimeoutMeasurement && weight > config.trigger && !stopMeasurement) {
-          log(3, "Start Measurement");
+          logger.info("Start Measurement");
           startTimeoutMeasurement = true;
+          durationSent = false;
 
           clearTimeout(algorithmTimeout);
           measurementTimeout = setTimeout(() => {
               // set a 5 sec timeout for the measurement duration
               stopMeasurement = true;
-              log(3, "Stop Measurement");
+              logger.info("Stop Measurement");
               sendCommand(commands[SamplingOff]);
               errorFlag = "00";
               checkError(errorFlag, (error, errorMessage) => {
@@ -595,11 +493,11 @@ function KGrip(socketPath) {
                   weightArray.reduce((a, b) => a + b, 0) / weightArray.length
                 ).toFixed(1);
                 // Showing results
-                log(3, "Baseline: ", baseline);
-                log(3, "Coef: ", coef);
-                log(3, "Num measures: ", weightArray.length);
-                log(3, "WeightMax: ", tempFile.outputData.weightMax, "Kg");
-                log(3, "WeightAVG: ", tempFile.outputData.weightMedia, "Kg");
+                logger.info(` -- Baseline: ${baseline}`);
+                logger.info(` -- Coef: ${coef}`);
+                logger.info(` -- Num measures: ${weightArray.length}`);
+                logger.info(` -- WeightMax: ${tempFile.outputData.weightMax}, Kg`);
+                logger.info(` -- WeightAVG: ${tempFile.outputData.weightMedia}, Kg`);
 
                 emitMessage({
                   message: "measure_finish",
@@ -618,8 +516,13 @@ function KGrip(socketPath) {
             weightMax = weight;
           }
           weightArray.push(weight);
-          emitMessage({ message: "measure_received", value: weight.toFixed(1) , duration: config.duration});
-          log(3, "Weight: ", weight.toFixed(1), " - WeightMax: ", weightMax.toFixed(1))
+          if(!durationSent){
+            emitMessage({ message: "measure_received", value: weight.toFixed(1), duration: config.duration});
+            durationSent = true;
+          } else {
+            emitMessage({ message: "measure_received", value: weight.toFixed(1)});
+          }
+          logger.debug(`Weight: ${weight.toFixed(1)},  - WeightMax: ${weightMax.toFixed(1)}`);
         }
     }
   }
@@ -648,7 +551,7 @@ function KGrip(socketPath) {
 function startMeasure(cb) {
   if(cb) callback = cb;
   algorithmTimeout = setTimeout(()=>{
-    log(1, "timeout during measureSamplingOn");
+    logger.error("timeout during measureSamplingOn");
     emitMessage({ message: "timeout" });
     endAlgorithm(6);
   },config.timeout);
@@ -663,7 +566,7 @@ function startMeasure(cb) {
  */
 function stopMeasure() {
 
-  log(3, "Stop Measure");
+  logger.info("Stop Measure");
   resetState();
 
   // Closing the port
@@ -673,13 +576,13 @@ function stopMeasure() {
       if(port){
         try {
           sendCommand(commands[DeviceOff]);  
-          log(3, "Closing Port");
+          logger.info("Closing Port");
           setTimeout(() => {
             port && port.isOpen && port.close();
             port = undefined;            
           }, 200);
         } catch (error) {
-          log(1, "Closing port ", error);
+          logger.error(`Closing port ${error}`);
         }
       }
      }, 500);
@@ -693,7 +596,7 @@ function stopMeasure() {
  * resetState
  */
 function resetState() {
-  log(3, "Resetting states to initial values");
+  logger.info("Resetting states to initial values");
 
   clearTimeout(algorithmTimeout);
   clearTimeout(timeoutForStartSampling);
@@ -702,6 +605,7 @@ function resetState() {
   clearInterval(searchUsbInterval);
 
   measureStarted = false;
+  durationSent = false;
   coef = 0;
   first = true;
   startTimeoutMeasurement = false;
@@ -718,6 +622,13 @@ function resetState() {
   searchUsbInterval = undefined;
   measurementTimeout = undefined;
   algorithmTimeout = undefined;
+
+  tempFile = {
+    hardware: "KForceGrip",
+    inputData: {},
+    outputData: {},
+    messages: [],
+  }
 }
 
 let mainWindow;
@@ -726,8 +637,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 550,
     height: 550,
-    x:825,
-    y:400,
+    x: config.screenOffset.x,
+    y: config.screenOffset.y,
     transparent: true,        // Transparent background
     frame: false,             // No window frame/border
     alwaysOnTop: true,        // Keep window on top (optional)
@@ -763,7 +674,7 @@ app.whenReady().then(() => {
   registerCallback((payload) => {
     if(!payload) return;
 
-    if(payload.message === "app_hide"){
+    if(payload.message === "app_hide" || payload.message === "timeout"){
       mainWindow.hide();
       return;
     }
