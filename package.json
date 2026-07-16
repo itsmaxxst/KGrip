@@ -1,0 +1,44 @@
+{
+  "name": "kforcegripgui",
+  "description": "KForceGrip GUI",
+  "license": "ISC"
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron . --remote-debugging-port=9222",
+    "start:segmented": "electron main-segmented.js",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "build": {
+    "appId": "kforcegripgui",
+    "productName": "KForceGripGUI",
+    "win": {
+      "target": "nsis"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "config.json",
+        "to": "../config.json"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": true,
+      "include": "build/installer.nsh"
+    }
+  },
+  "dependencies": {
+    "big.js": "^7.0.1",
+    "serialport": "^13.0.0",
+    "zeromq": "^6.5.0"
+  }, 
+  "devDependencies": {
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1"
+  }
+}
