@@ -56,7 +56,7 @@ The test application should:
 
 The test app must send the following messages:
 
-- `measureStart`
+- `measureStart` (follow the payload structure at the bottom)
 - `measureSamplingOn`
 - `measureStop`
 
@@ -79,4 +79,15 @@ You are free to implement this test project however you prefer, depending on you
 - `measureStop`  
 
 ✔ Ensure bidirectional communication with the plugin (front-end emulation)
+
+### Payload structure
+{
+      "command":{
+        "inputData": { 
+          "cmd": "measureStart"
+        },
+        "outputData": {}
+        }
+}
+
 
