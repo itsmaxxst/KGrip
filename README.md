@@ -11,7 +11,6 @@ project-root/
 ├── temp.json
 ├── config.json
 ├── package.json
-├── debug.log (create this as an empty file – it will populate with debug logs)
 │
 └── src/
       ├── gauge-segmented.js
@@ -34,7 +33,7 @@ project-root/
 ## Important Notes
 
 ### 1. `debug.log`
-Create an empty `debug.log` file in the root directory.  
+It will create a `debug.log` file in the directory spicified in the config.  
 It will automatically populate with debug logs during runtime.
 
 ### 2. Fonts (Optional)
